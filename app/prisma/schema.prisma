@@ -1,0 +1,346 @@
+// PetBuddyCentral Store Keeper — Prisma Schema
+// Full multi-tenant franchise schema from TRD §3
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Multi-Tenant Core ─────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String   // "P.B.C. Pet Buddy LLP"
+  slug      String   @unique
+  logoUrl   String?
+  email     String?
+  phone     String?
+  website   String?
+  gstNumber String?  // "09ABEFP2368R1ZF"
+  settings  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stores        Store[]
+  users         User[]
+  products      Product[]
+  productGroups ProductGroup[]
+  customers     Customer[]
+  suppliers     Supplier[]
+  categories    Category[]
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id])
+  name      String   // "Kanpur Hub Store"
+  code      String   // "S01"
+  address   String
+  city      String
+  state     String
+  pincode   String
+  phone     String
+  gstNumber String?
+  isActive  Boolean  @default(true)
+  settings  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  inventory   StoreInventory[]
+  invoices    Invoice[]
+  shifts      Shift[]
+  cashDrawers CashDrawer[]
+  batches     ProductBatch[]
+
+  @@unique([orgId, code])
+}
+
+// ─── Users & Auth ───────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id])
+  storeId      String?
+  store        Store?   @relation(fields: [storeId], references: [id])
+  name         String
+  email        String   @unique
+  passwordHash String
+  pin          String?  // 4-6 digit hashed PIN for quick login
+  role         String   // SUPER_ADMIN, FRANCHISE_OWNER, STORE_MANAGER
+  isActive     Boolean  @default(true)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  invoices         Invoice[]
+  shifts           Shift[]
+  auditLogs        AuditLog[]
+  stockAdjustments StockAdjustment[]
+}
+
+// ─── Products & Inventory ───────────────────
+
+model Category {
+  id        String @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id])
+  name      String // "Dog Food", "Cat Food", etc.
+  icon      String? // emoji or icon identifier
+  sortOrder Int    @default(0)
+
+  products Product[]
+
+  @@unique([orgId, name])
+}
+
+model ProductGroup {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id])
+  name        String
+  description String?
+  products    Product[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([orgId, name])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id])
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  sku         String
+  name        String
+  description String?
+  imageUrl    String?
+  price       Float    // Selling price
+  costPrice   Float?   // Cost price for margin calc
+  unit        String   @default("pcs") // pcs, kg, litre
+  hsnCode     String?  // For GST
+  groupId     String?  // Link to ProductGroup for variant grouping (e.g. 1kg, 2kg, 10kg)
+  group       ProductGroup? @relation(fields: [groupId], references: [id])
+  taxRate     Float    @default(18.00) // Per-product GST rate
+  variants    String?  // JSON: [{size: "10kg", price: 1200}, ...]
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false) // Soft delete flag
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  inventory    StoreInventory[]
+  invoiceItems InvoiceItem[]
+  batches      ProductBatch[]
+
+  @@unique([orgId, sku])
+}
+
+model ProductBatch {
+  id              String    @id @default(cuid())
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id])
+  storeId         String
+  store           Store     @relation(fields: [storeId], references: [id])
+  batchNumber     String
+  quantity        Int
+  costPrice       Float?
+  manufactureDate DateTime?
+  expiryDate      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([productId, storeId])
+}
+
+model StoreInventory {
+  id                String  @id @default(cuid())
+  storeId           String
+  store             Store   @relation(fields: [storeId], references: [id])
+  productId         String
+  product           Product @relation(fields: [productId], references: [id])
+  quantity          Int     @default(0)
+  lowStockThreshold Int     @default(10)
+  reorderPoint      Int     @default(15)
+  lastRestocked     DateTime?
+
+  adjustments StockAdjustment[]
+
+  @@unique([storeId, productId])
+}
+
+model StockAdjustment {
+  id          String         @id @default(cuid())
+  inventoryId String
+  inventory   StoreInventory @relation(fields: [inventoryId], references: [id])
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  type        String         // "RECEIVE", "DAMAGE", "THEFT", "CORRECTION", "RETURN", "SALE"
+  quantity    Int            // positive = add, negative = remove
+  reason      String?
+  createdAt   DateTime       @default(now())
+}
+
+// ─── Billing & Invoices ─────────────────────
+
+model Invoice {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  createdById   String
+  createdBy     User     @relation(fields: [createdById], references: [id])
+  invoiceNumber String   @unique // "PBC-S01-00001"
+  subtotal      Float
+  taxRate       Float    @default(18.00)
+  taxAmount     Float
+  discount      Float    @default(0)
+  total         Float
+  paymentMethod String   // CASH, UPI, CARD, MIXED
+  status        String   @default("COMPLETED") // COMPLETED, REFUNDED, VOIDED, HELD
+  notes         String?
+  shareToken    String   @unique @default(cuid()) // Public URL token
+  createdAt     DateTime @default(now())
+
+  items InvoiceItem[]
+
+  @@index([storeId, createdAt])
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Float
+  total     Float
+}
+
+// ─── Customers ──────────────────────────────
+
+model Customer {
+  id            String   @id @default(cuid())
+  orgId         String
+  org           Organization @relation(fields: [orgId], references: [id])
+  name          String
+  phone         String
+  email         String?
+  address       String?
+  loyaltyPoints Int      @default(0)
+  loyaltyTier   String   @default("BRONZE") // BRONZE, SILVER, GOLD
+  tags          String   @default("[]") // JSON array: ["VIP", "Bulk Buyer"]
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  invoices Invoice[]
+  pets     Pet[]
+
+  @@unique([orgId, phone])
+}
+
+model Pet {
+  id                String    @id @default(cuid())
+  customerId        String
+  customer          Customer  @relation(fields: [customerId], references: [id])
+  name              String
+  type              String    // "dog", "cat", "bird", "fish"
+  breed             String?
+  birthday          DateTime?
+  weight            Float?
+  dietaryNeeds      String    @default("[]") // JSON array
+  medicalConditions String    @default("[]") // JSON array
+  createdAt         DateTime  @default(now())
+}
+
+// ─── Purchase Orders ────────────────────────
+
+model Supplier {
+  id           String @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id])
+  name         String
+  phone        String?
+  email        String?
+  address      String?
+  leadTimeDays Int    @default(7)
+
+  purchaseOrders PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id           String    @id @default(cuid())
+  storeId      String
+  supplierId   String
+  supplier     Supplier  @relation(fields: [supplierId], references: [id])
+  poNumber     String    @unique
+  status       String    @default("DRAFT") // DRAFT, SENT, PARTIAL, RECEIVED, CANCELLED
+  expectedDate DateTime?
+  totalAmount  Float?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  items PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId        String
+  quantityOrdered  Int
+  quantityReceived Int           @default(0)
+  unitCost         Float
+}
+
+// ─── Operations ─────────────────────────────
+
+model Shift {
+  id       String    @id @default(cuid())
+  storeId  String
+  store    Store     @relation(fields: [storeId], references: [id])
+  userId   String
+  user     User      @relation(fields: [userId], references: [id])
+  clockIn  DateTime
+  clockOut DateTime?
+  breaks   String?   // JSON: [{start, end, paid}]
+  notes    String?
+}
+
+model CashDrawer {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  shiftDate     DateTime
+  startingFloat Float
+  expectedCash  Float?
+  actualCash    Float?
+  variance      Float?
+  movements     String?  // JSON: [{type, amount, time, userId, note}]
+  isReconciled  Boolean  @default(false)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String   // "CREATE_INVOICE", "ADJUST_STOCK", etc.
+  entity    String   // "Invoice", "Product", etc.
+  entityId  String
+  details   String?  // JSON
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+}
