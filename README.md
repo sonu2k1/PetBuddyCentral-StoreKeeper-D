@@ -9,6 +9,8 @@
   <strong>A modern, multi-tenant Point of Sale & Inventory Management System for pet stores</strong>
 </p>
 
+<h3 align="center"><a href="https://app-ten-chi-55.vercel.app"><strong>Want to see live preview »</strong></a></h3>
+
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#tech-stack">Tech Stack</a> •
