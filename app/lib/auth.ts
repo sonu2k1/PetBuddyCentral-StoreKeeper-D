@@ -2,15 +2,10 @@ import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { compare } from 'bcryptjs'
 import { prisma } from './prisma'
+import { authConfig } from './auth.config'
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-    pages: {
-        signIn: '/login',
-    },
-    session: {
-        strategy: 'jwt',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-    },
+    ...authConfig,
     providers: [
         Credentials({
             name: 'credentials',
@@ -55,31 +50,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             },
         }),
     ],
-    callbacks: {
-        async jwt({ token, user }) {
-            if (user) {
-                token.role = (user as any).role
-                token.orgId = (user as any).orgId
-                token.orgName = (user as any).orgName
-                token.storeId = (user as any).storeId
-                token.storeName = (user as any).storeName
-                token.avatarUrl = (user as any).avatarUrl
-            }
-            return token
-        },
-        async session({ session, token }) {
-            if (session.user) {
-                session.user.id = token.sub!
-                    ; (session.user as any).role = token.role
-                    ; (session.user as any).orgId = token.orgId
-                    ; (session.user as any).orgName = token.orgName
-                    ; (session.user as any).storeId = token.storeId
-                    ; (session.user as any).storeName = token.storeName
-                    ; (session.user as any).avatarUrl = token.avatarUrl
-            }
-            return session
-        },
-    },
 })
 
 // Role-based redirect paths
