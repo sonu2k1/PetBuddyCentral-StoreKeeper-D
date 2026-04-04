@@ -35,6 +35,11 @@ export default function LoginPage() {
                 return
             }
 
+            // Force a server-side re-evaluation — middleware will redirect to the correct dashboard
+            router.refresh()
+            // Small delay to let the session cookie propagate, then navigate
+            await new Promise((resolve) => setTimeout(resolve, 500))
+
             // Fetch session to get role for redirect
             const res = await fetch('/api/auth/session')
             const session = await res.json()
